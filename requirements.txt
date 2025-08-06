@@ -1,0 +1,12 @@
+imbalanced-learn
+keras-tuner
+matplotlib
+numpy
+pandas
+scikit-learn
+scikeras
+scipy
+seaborn
+tensorflow[and-cuda]
+wfdb
+nvidia-cudnn

@@ -1,0 +1,674 @@
+#include <SPI.h>
+#include <SD.h>
+#include <RTClib.h>
+
+// #include <TensorFlowLite.h>
+#include <ArduTFLite.h>
+// #include <Chirale_TensorFlowLite.h>
+
+#include "tensorflow/lite/micro/tflite_bridge/micro_error_reporter.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
+#include "tensorflow/lite/schema/schema_generated.h"
+
+#include "PeakDetector.h"
+#include "CircularBuffer.h"
+#include "ElasticEnvelope.h"
+#include "DetectionResponder.h"
+#include "model.h"
+
+// Pin untuk komunikasi SPI ADS1293 (VSPI)
+int mosi = 35;
+int miso = 37;
+int sclk = 36;
+int dredy = 40;  // Pin DRDYB
+int csb = 39;     // Pin CSB
+
+// Pin definitions for SD card SPI communication (HSPI)
+#define HSPI_MOSI 11
+#define HSPI_MISO 13
+#define HSPI_SCLK 12
+#define HSPI_CS   10
+
+// Logging control pin
+#define LOGGING_SWITCH_PIN 2
+
+// SPI instances
+SPIClass vspi(FSPI); // For ADS1293
+SPIClass hspi(HSPI); // For SD card
+
+// RTC instance
+RTC_DS3231 rtc;
+
+// Logging variables
+bool loggingEnabled = false;
+bool lastLoggingState = false;
+String currentLogFileName = "";
+File logFile;
+unsigned long dataCounter = 0;
+unsigned long lastDataTime = 0;
+const unsigned long SAMPLE_INTERVAL_MS = 3; // ~320Hz (1000/320 ≈ 3.125ms)
+
+volatile float bpm = 0;
+
+// ADD 1
+namespace {
+  const int WINDOW_SIZE = 10;
+  PeakDetector<5> peakDetector(0.005f, 0.2f);
+  CircularBuffer<int, WINDOW_SIZE> buffer;
+  ElasticEnvelope envelope(0.1f);
+
+  constexpr int kTensorArenaSize = 2 * 1024;
+  uint8_t tensor_arena[kTensorArenaSize];
+
+  tflite::ErrorReporter* error_reporter = nullptr;
+  const tflite::Model* model = nullptr;
+  tflite::MicroInterpreter* interpreter = nullptr;
+
+  // Global variables for model output probabilities
+  float model_output_probabilities[3] = {0.0f, 0.0f, 0.0f}; //PATRICK NEW
+} // namespace
+
+// Variabel untuk penyimpanan data sementara
+int32_t ecgTmp1 = 0, ecgTmp2 = 0, ecgTmp3 = 0;
+
+//PATRICK ADD
+volatile int classification = 0; // GLOBAL VAR biar bisa diakses dimana2
+
+// Buffer untuk baseline correction
+const int baselineWindowSize = 200; // Window size untuk baseline
+int32_t baselineBuffer1[baselineWindowSize] = {0};
+int32_t baselineBuffer2[baselineWindowSize] = {0};
+int32_t baselineBuffer3[baselineWindowSize] = {0};
+int baselineIndex = 0;
+
+// Koefisien FIR yang diberikan DAFFA
+const int firLength = 480;   // Jumlah koefisien FIR
+float firCoefficients[firLength] = {
+-0.00009513, -0.00002638, 0.00006214, 0.00010473, 0.00006844, -0.00002235,
+-0.00010293, -0.00011490, -0.00004911, 0.00004653, 0.00010095, 0.00007154,
+-0.00002365, -0.00011745, -0.00014168, -0.00007744, 0.00002919, 0.00009898,
+0.00007697, -0.00002576, -0.00013774, -0.00017768, -0.00011458, 0.00000706,
+0.00009694, 0.00008427, -0.00002859, -0.00016433, -0.00022490, -0.00016377,
+-0.00002328, 0.00009252, 0.00009266, -0.00003195, -0.00019745, -0.00028504, 
+-0.00022821, -0.00006548, 0.00008299, 0.00010112, -0.00003564, -0.00023700,
+-0.00035938, -0.00031094, -0.00012334, 0.00006529, 0.00010838, -0.00003938,
+-0.00028249, -0.00044877, -0.00041467, -0.00020073, 0.00003605, 0.00011286,
+-0.00004288, -0.00033305, -0.00055348, -0.00054175, -0.00030147, -0.00000835,
+0.00011274, -0.00004581, -0.00038740, -0.00067315, -0.00069399, -0.00042920,
+-0.00007169, 0.00010597, -0.00004784, -0.00044385, -0.00080677, -0.00087259,
+-0.00058731, -0.00015786, 0.00009026, -0.00004865, -0.00050032, -0.00095261,
+-0.00107808, -0.00077882, -0.00027078, 0.00006310, -0.00004794, -0.00055431, 
+-0.00110817, -0.00131019, -0.00100627, -0.00041433, 0.00002184, -0.00004542,
+-0.00060293, -0.00127022, -0.00156782, -0.00127169, -0.00059230, -0.00003638,
+-0.00004087, -0.00064294, -0.00143472, -0.00184899, -0.00157650, -0.00080834,
+-0.00011455, -0.00003411, -0.00067072, -0.00159684, -0.00215080, -0.00192148,
+-0.00106594, -0.00021581, -0.00002503, -0.00068230, -0.00175096, -0.00246944,
+-0.00230676, -0.00136843, -0.00034346, -0.00001359, -0.00067335, -0.00189063,
+-0.00280013, -0.00273186, -0.00171900, -0.00050100, 0.00000018, -0.00063913,
+-0.00200857, -0.00313718, -0.00319572, -0.00212083, -0.00069221, 0.00001616,
+-0.00057443, -0.00209654, -0.00347395, -0.00369681, -0.00257726, -0.00092125,
+0.00003416, -0.00047348, -0.00214522, -0.00380280, -0.00423329, -0.00309203, 
+-0.00119290, 0.00005392, -0.00032966, -0.00214396, -0.00411508, -0.00480327,
+-0.00366972, -0.00151290, 0.00007511, -0.00013521, -0.00208034, -0.00440099,
+-0.00540516, -0.00431645, -0.00188845, 0.00009733, 0.00011937, -0.00193946,
+-0.00464927, -0.00603816, -0.00504088, -0.00232909, 0.00012015, 0.00044628,
+-0.00170270, -0.00484675, -0.00670308, -0.00585594, -0.00284810, 0.00014308,
+0.00086202, -0.00134565, -0.00497742, -0.00740362, -0.00678163, -0.00346488,
+0.00016564, 0.00139014, -0.00083439, -0.00502077, -0.00814848, -0.00784999,
+-0.00420929, 0.00018729, 0.00206638, -0.00011860, -0.00494848, -0.00895521,
+-0.00911444, -0.00512974, 0.00020756, 0.00294852, 0.00088200, -0.00471783,
+-0.00985792, -0.01066860, -0.00631006, 0.00022595, 0.00413746, 0.00230711,
+-0.00425707, -0.01092402, -0.01268870, -0.00790799, 0.00024202, 0.00582715,
+0.00442710, -0.00342907, -0.01229641, -0.01554308, -0.01025711, 0.00025539,
+0.00844393, 0.00784747, -0.00192367, -0.01432181, -0.02013704, -0.01419998,
+0.00026571, 0.01314035, 0.01426755, 0.00116198, -0.01807788, -0.02941632,
+-0.02263788, 0.00027274, 0.02447192, 0.03098758, 0.01009353, -0.02930554,
+-0.06135051, -0.05654396, 0.00027630, 0.09804386, 0.20161572, 0.26796519,
+0.26796519, 0.20161572, 0.09804386, 0.00027630, -0.05654396, -0.06135051,
+-0.02930554, 0.01009353, 0.03098758, 0.02447192, 0.00027274, -0.02263788,
+-0.02941632, -0.01807788, 0.00116198, 0.01426755, 0.01314035, 0.00026571,
+-0.01419998, -0.02013704, -0.01432181, -0.00192367, 0.00784747, 0.00844393,
+0.00025539, -0.01025711, -0.01554308, -0.01229641, -0.00342907, 0.00442710, 
+0.00582715, 0.00024202, -0.00790799, -0.01268870, -0.01092402, -0.00425707,
+0.00230711, 0.00413746, 0.00022595, -0.00631006, -0.01066860, -0.00985792,
+-0.00471783, 0.00088200, 0.00294852, 0.00020756, -0.00512974, -0.00911444,
+-0.00895521, -0.00494848, -0.00011860, 0.00206638, 0.00018729, -0.00420929,
+-0.00784999, -0.00814848, -0.00502077, -0.00083439, 0.00139014, 0.00016564,
+-0.00346488, -0.00678163, -0.00740362, -0.00497742, -0.00134565, 0.00086202,
+0.00014308, -0.00284810, -0.00585594, -0.00670308, -0.00484675, -0.00170270,
+0.00044628, 0.00012015, -0.00232909, -0.00504088, -0.00603816, -0.00464927,
+-0.00193946, 0.00011937, 0.00009733, -0.00188845, -0.00431645, -0.00540516, 
+-0.00440099, -0.00208034, -0.00013521, 0.00007511, -0.00151290, -0.00366972,
+-0.00480327, -0.00411508, -0.00214396, -0.00032966, 0.00005392, -0.00119290,
+-0.00309203, -0.00423329, -0.00380280, -0.00214522, -0.00047348, 0.00003416,
+-0.00092125, -0.00257726, -0.00369681, -0.00347395, -0.00209654, -0.00057443,
+0.00001616, -0.00069221, -0.00212083, -0.00319572, -0.00313718, -0.00200857,
+-0.00063913, 0.00000018, -0.00050100, -0.00171900, -0.00273186, -0.00280013,
+-0.00189063, -0.00067335, -0.00001359, -0.00034346, -0.00136843, -0.00230676,
+-0.00246944, -0.00175096, -0.00068230, -0.00002503, -0.00021581, -0.00106594,
+-0.00192148, -0.00215080, -0.00159684, -0.00067072, -0.00003411, -0.00011455,
+-0.00080834, -0.00157650, -0.00184899, -0.00143472, -0.00064294, -0.00004087, 
+-0.00003638, -0.00059230, -0.00127169, -0.00156782, -0.00127022, -0.00060293,
+-0.00004542, 0.00002184, -0.00041433, -0.00100627, -0.00131019, -0.00110817,
+-0.00055431, -0.00004794, 0.00006310, -0.00027078, -0.00077882, -0.00107808,
+-0.00095261, -0.00050032, -0.00004865, 0.00009026, -0.00015786, -0.00058731,
+-0.00087259, -0.00080677, -0.00044385, -0.00004784, 0.00010597, -0.00007169,
+-0.00042920, -0.00069399, -0.00067315, -0.00038740, -0.00004581, 0.00011274,
+-0.00000835, -0.00030147, -0.00054175, -0.00055348, -0.00033305, -0.00004288,
+0.00011286, 0.00003605, -0.00020073, -0.00041467, -0.00044877, -0.00028249,
+-0.00003938, 0.00010838, 0.00006529, -0.00012334, -0.00031094, -0.00035938,
+-0.00023700, -0.00003564, 0.00010112, 0.00008299, -0.00006548, -0.00022821,
+-0.00028504, -0.00019745, -0.00003195, 0.00009266, 0.00009252, -0.00002328,
+-0.00016377, -0.00022490, -0.00016433, -0.00002859, 0.00008427, 0.00009694, 
+0.00000706, -0.00011458, -0.00017768, -0.00013774, -0.00002576, 0.00007697,
+0.00009898, 0.00002919, -0.00007744, -0.00014168, -0.00011745, -0.00002365,
+0.00007154, 0.00010095, 0.00004653, -0.00004911, -0.00011490, -0.00010293,
+-0.00002235, 0.00006844, 0.00010473, 0.00006214, -0.00002638, -0.00009513,
+};
+
+// Buffer untuk data sinyal yang telah diproses
+// DEKLARASI TIGA BUFFER TERPISAH UNTUK SETIAP LEAD
+float firBuffer1[firLength] = {0.0f}; // Untuk ECG Lead 1
+float firBuffer2[firLength] = {0.0f}; // Untuk ECG Lead 2
+float firBuffer3[firLength] = {0.0f}; // Untuk ECG Lead 3
+
+// Function declarations
+void initializeLogging();
+void checkLoggingSwitch();
+void startLogging();
+void stopLogging();
+void logECGData(int32_t ecg1, int32_t ecg2, int32_t ecg3, int32_t leadIII, float bpm_val, int class_val);
+String generateLogFileName();
+
+// Fungsi applyFIRFilter yang menerima pointer ke buffer dan panjang buffer
+// Ini membuatnya lebih fleksibel
+float applyFIRFilter(float newValue, float* buffer_to_use, int buffer_len) {
+  for (int i = buffer_len - 1; i > 0; i--) {
+    buffer_to_use[i] = buffer_to_use[i - 1];
+  }
+  buffer_to_use[0] = newValue; // Simpan nilai baru ke depan buffer
+
+  float output = 0.0f; // Akumulator harus float
+  for (int i = 0; i < buffer_len; i++) {
+    output += firCoefficients[i] * buffer_to_use[i];
+  }
+  return output;
+}
+
+void setup() {
+  // Configure pins
+  pinMode(mosi, OUTPUT);
+  pinMode(miso, INPUT);
+  pinMode(sclk, OUTPUT);
+  pinMode(csb, OUTPUT);
+  pinMode(dredy, INPUT);
+  pinMode(21, OUTPUT);
+  digitalWrite(21, LOW);
+  
+  // Configure logging switch pin with internal pull-up
+  pinMode(LOGGING_SWITCH_PIN, INPUT_PULLUP);
+
+  Serial.begin(115200);
+  
+  // Initialize RTC
+  if (!rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while (1);
+  }
+  
+  // Initialize dual SPI
+  // VSPI for ADS1293
+  vspi.begin(sclk, miso, mosi, -1);
+  vspi.setBitOrder(MSBFIRST);
+  vspi.setDataMode(SPI_MODE1);
+  vspi.setClockDivider(SPI_CLOCK_DIV2);
+  
+  // HSPI for SD card
+  hspi.begin(HSPI_SCLK, HSPI_MISO, HSPI_MOSI, -1);
+  
+  // Initialize SD card
+  if (!SD.begin(HSPI_CS, hspi)) {
+    Serial.println("SD Card initialization failed!");
+    while (1);
+  }
+  Serial.println("SD Card initialized successfully");
+  
+  digitalWrite(csb, HIGH); // Ensure CSB is inactive initially
+
+  // Initialize logging system
+  initializeLogging();
+
+  // ADD 2
+  static tflite::MicroErrorReporter micro_error_reporter;
+  error_reporter = &micro_error_reporter;
+
+  model = tflite::GetModel(model_tflite);
+  if (model->version() != TFLITE_SCHEMA_VERSION) {
+    TF_LITE_REPORT_ERROR(error_reporter,
+                         "Model provided is schema version %d not equal "
+                         "to supported version %d.",
+                         model->version(), TFLITE_SCHEMA_VERSION);
+    return;
+  }
+
+  // Pull in only the operation implementations we need.
+  static tflite::MicroMutableOpResolver<4> op_resolver;
+  op_resolver.AddFullyConnected();
+  op_resolver.AddLogistic();
+  op_resolver.AddRelu();
+  op_resolver.AddSoftmax();
+
+  // Build an interpreter to run the model with.
+  static tflite::MicroInterpreter static_interpreter(
+      model, op_resolver, tensor_arena, kTensorArenaSize);
+  interpreter = &static_interpreter;
+
+  // Allocate memory from the tensor_arena for the model's tensors.
+  interpreter->AllocateTensors();
+
+  // Set model input settings
+  TfLiteTensor* model_input = interpreter->input(0);
+  if ((model_input->dims->size != 2) ||
+      (model_input->dims->data[0] != 1) ||
+      (model_input->dims->data[1] != 10) ||
+      (model_input->type != kTfLiteFloat32)) {
+    TF_LITE_REPORT_ERROR(error_reporter,
+                         "Bad input tensor parameters in model");
+    return;
+  }
+
+  // Set model output settings
+  TfLiteTensor* model_output = interpreter->output(0);
+  if ((model_output->dims->size != 2) ||
+      (model_output->dims->data[0] != 1) ||
+      (model_output->dims->data[1] != 3) ||
+      (model_output->type != kTfLiteFloat32)) {
+    TF_LITE_REPORT_ERROR(error_reporter,
+                         "Bad output tensor parameters in model");
+    return;
+  }
+
+  // Setup detection responder
+  DetectionResponder::setup();
+  // Setup ECG
+  setup_ECG();
+  
+  Serial.println("System initialized successfully");
+  Serial.println("Toggle switch on pin 2 to start/stop logging");
+}
+
+void loop() {
+  // Check logging switch status
+  checkLoggingSwitch();
+  
+  // Wait until DRDYB is active low, ensuring data is ready to be read
+  if (digitalRead(dredy) == LOW) {
+    // Ensure data reading is done within DRDYB time limit
+    bool success = readECGDataWithBaselineCorrection();
+
+    if (!success) {
+      Serial.println("Data reading error: Possible data loss due to incomplete read.");
+    }
+  }
+}
+
+void initializeLogging() {
+  dataCounter = 0;
+  lastDataTime = millis();
+  Serial.println("Logging system initialized");
+}
+
+void checkLoggingSwitch() {
+  bool currentSwitchState = !digitalRead(LOGGING_SWITCH_PIN); // Inverted because of pull-up
+  
+  if (currentSwitchState != lastLoggingState) {
+    lastLoggingState = currentSwitchState;
+    
+    if (currentSwitchState) {
+      startLogging();
+    } else {
+      stopLogging();
+    }
+  }
+}
+
+void startLogging() {
+  if (!loggingEnabled) {
+    DateTime now = rtc.now();
+
+    String yearStr = String(now.year());
+    String monthStr = (now.month() < 10 ? "0" : "") + String(now.month());
+    String dayStr = (now.day() < 10 ? "0" : "") + String(now.day());
+    String hourStr = (now.hour() < 10 ? "0" : "") + String(now.hour());
+    String minuteStr = (now.minute() < 10 ? "0" : "") + String(now.minute());
+    String secondStr = (now.second() < 10 ? "0" : "") + String(now.second());
+    
+    currentLogFileName = "/" + yearStr + monthStr + dayStr + hourStr + minuteStr + secondStr + ".csv";
+    loggingEnabled = true;
+    dataCounter = 0;
+    lastDataTime = millis();
+    
+    // Create new log file with header
+    logFile = SD.open(currentLogFileName, FILE_WRITE);
+    if (logFile) {
+      logFile.println("Timestamp,ECG1,ECG2,ECG3,LeadIII,BPM,Classification");
+      logFile.close();
+      Serial.println("Logging started: " + currentLogFileName);
+    } else {
+      Serial.println("Error creating log file");
+      loggingEnabled = false;
+    }
+  }
+}
+
+void stopLogging() {
+  if (loggingEnabled) {
+    loggingEnabled = false;
+    Serial.println("Logging stopped");
+  }
+}
+
+String generateLogFileName() {
+  DateTime now = rtc.now();
+  
+  // Format: YYMMDDhhmmss.csv
+  String fileName = "";
+  
+  // Year (last 2 digits)
+  int year = now.year() % 100;
+  if (year < 10) fileName += "0";
+  fileName += String(year);
+  
+  // Month
+  if (now.month() < 10) fileName += "0";
+  fileName += String(now.month());
+  
+  // Day
+  if (now.day() < 10) fileName += "0";
+  fileName += String(now.day());
+  
+  // Hour
+  if (now.hour() < 10) fileName += "0";
+  fileName += String(now.hour());
+  
+  // Minute
+  if (now.minute() < 10) fileName += "0";
+  fileName += String(now.minute());
+  
+  // Second
+  if (now.second() < 10) fileName += "0";
+  fileName += String(now.second());
+  
+  fileName += ".csv";
+  
+  return fileName;
+}
+
+void logECGData(int32_t ecg1_raw, int32_t ecg2_filtered, int32_t ecg3_filtered, int32_t leadIII, float bpm_val, int class_val) {
+  if (!loggingEnabled) return;
+  
+  unsigned long currentTime = millis();
+  
+  // Calculate timestamp based on data counter and expected interval
+  float timestamp = dataCounter * SAMPLE_INTERVAL_MS;
+  
+  logFile = SD.open(currentLogFileName, FILE_APPEND);
+  if (logFile) {
+    // Format: timestamp, ecg1, ecg2, ecg3, leadIII, bpm, classification
+    logFile.print(timestamp, 3); // 3 decimal places for milliseconds
+    logFile.print(",");
+    logFile.print(ecg1_raw);
+    logFile.print(",");
+    logFile.print(ecg2_filtered);
+    logFile.print(",");
+    logFile.print(ecg3_filtered);
+    logFile.print(",");
+    logFile.print(leadIII);
+    logFile.print(",");
+    logFile.print(bpm_val, 2); // 2 decimal places for BPM
+    logFile.print(",");
+    logFile.println(class_val);
+    logFile.close();
+    
+    dataCounter++;
+  } else {
+    Serial.println("Error writing to log file");
+  }
+}
+
+// Fungsi untuk membaca data ECG dengan sinkronisasi DRDYB
+bool readECGDataWithBaselineCorrection() {
+  // Pastikan DRDYB masih aktif rendah sebelum membaca
+  if (digitalRead(dredy) != LOW) {
+    return false; // Data tidak tersedia
+  }
+
+  // Buffer untuk menyimpan data dari channel
+  int32_t ecg1 = 0, ecg2 = 0, ecg3 = 0;
+
+  // Add 3
+  static long lastPeakTime = millis();
+
+  // Baca data dari register streaming
+  readECGStreamingData(&ecg1, &ecg2, &ecg3);
+
+  // Terapkan filter FIR pada nilai yang sudah dinormalisasi
+  // Panggil applyFIRFilter dengan buffer yang berbeda untuk setiap lead
+  ecgTmp1 = applyFIRFilter((float)ecg1, firBuffer1, firLength);
+  ecgTmp2 = applyFIRFilter((float)ecg2, firBuffer2, firLength);
+  ecgTmp3 = applyFIRFilter((float)ecg3, firBuffer3, firLength);
+
+  // Add 5
+  int sample = ecgTmp2;
+
+  // Hitung Lead III berdasarkan Einthoven's Law
+  int32_t ecgLeadIII = ecgTmp2 - ecgTmp1;
+
+  // Log data if logging is enabled
+  logECGData(ecg2, ecgTmp2, ecgTmp3, ecgLeadIII, bpm, classification);
+
+  // // Kirim data ke serial untuk plot
+  // Serial.print(ecg2); // Lead I (raw)
+  // Serial.print("\t");
+  // Serial.print(ecgTmp2); // Lead II (filtered)
+  // Serial.print("\t");
+  // Serial.print(ecgLeadIII); // Lead III
+  // Serial.print("\t");
+  // Serial.print(ecgTmp3); // Lead V1 (filtered)
+  // Serial.print("\t");
+  // Serial.print(classification);
+  // Serial.print("\t");
+  // Serial.print(bpm);
+  // Serial.print("\t");
+  // Serial.println(loggingEnabled ? 1 : 0); // Logging status indicator
+
+  // Add 4
+  peakDetector.addSample(sample);
+  if (peakDetector.isPeakDetected())
+  {
+    long currTime = millis();
+    int peakTimeDiff = currTime - lastPeakTime;
+    lastPeakTime = currTime;
+    buffer.push(peakTimeDiff);
+    envelope.addValue(peakTimeDiff);
+    bpm = 60000.0/peakTimeDiff; //ADD
+    int CLASS_BPM = 0; //ADD
+
+
+    if (bpm < 100.0f && bpm > 60.0f){
+      CLASS_BPM = 0; //NORMAL 60-100
+    }
+    else if (bpm < 30.0f || bpm > 200.0f){
+      CLASS_BPM = 3; //ASISTOL OR NOISE
+    }
+    else if (bpm < 60.0f){
+      CLASS_BPM = 2; //BRADI
+    }
+    else if (bpm > 100.0f){
+      CLASS_BPM=1; //TAKI
+    }
+
+    if (buffer.isFilled()) {
+      for (int i = 0; i < WINDOW_SIZE; ++i) {
+        interpreter->input(0)->data.f[i] = static_cast<float>(buffer[i]) / envelope.getMax();
+      }
+
+      // Run the model on this input and check that it succeeds
+      TfLiteStatus invoke_status = interpreter->Invoke();
+      if (invoke_status != kTfLiteOk) {
+        Serial.println("Invoke failed");
+        while (true); // Halt execution
+      }
+      else {
+        for (int i = 0; i < 3; ++i) {
+          model_output_probabilities[i] = interpreter->output(0)->data.f[i]; //PATRICK NEW
+        }
+      }
+      // Read the predicted value
+      //float y_pred = interpreter->output(0)->data.f[0];
+      //Serial.print("y_pred = ");
+      //Serial.println(y_pred);
+      // DetectionResponder::respondToDetection(y_pred);
+    }
+    peakDetector.clearPeakFlag();
+
+    const float THRESHOLD_PVC = 0.5f;    // Example: If PVC probability > 0.5, consider it PVC.
+    const float THRESHOLD_FLUTTER = 0.5f; // Example: If Flutter probability > 0.5, consider it Flutter.
+    
+    // Determine the model's most confident prediction
+    int model_predicted_class = -1;
+    float max_model_prob = -1.0f;
+    for (int i = 0; i < 3; ++i) {
+        if (model_output_probabilities[i] > max_model_prob) {
+            max_model_prob = model_output_probabilities[i];
+            model_predicted_class = i;
+        }
+    }
+
+    // Apply the combined classification logic
+    if (CLASS_BPM == 0) { // BPM is NORMAL (60-100 bpm)
+        if (model_predicted_class == 2 && max_model_prob >= THRESHOLD_FLUTTER) {
+            classification = 2; // FLUTTER (Model strongly predicts Flutter)
+        } else if (model_predicted_class == 1 && max_model_prob >= THRESHOLD_PVC) {
+            classification = 1; // PVC (Model strongly predicts PVC)
+        } else {
+            classification = 0; // NORMAL (Model either predicts Normal or is not confident enough in anomalies)
+        }
+    } else if (CLASS_BPM == 3) { // ASISTOL (or extreme irregularity/noise affecting BPM)
+        classification = 5; // ASISTOL (BPM rate abnormality takes precedence)
+    } else if (CLASS_BPM == 2) { // BRADIKARDIA (<60 bpm)
+        classification = 4; // BRADIKARDIA (BPM rate abnormality takes precedence)
+    } else if (CLASS_BPM == 1) { // TAKIKARDIA (>100 bpm)
+        classification = 3; // TAKIKARDIA (BPM rate abnormality takes precedence)
+    } else {
+        classification = 6; // UNCLASSIFIABLE (Fallback for any unhandled state)
+    }
+
+
+    DetectionResponder::respondToDetection(classification);
+
+
+  }
+  // Pastikan data dibaca dalam waktu sebelum DRDYB dinonaktifkan
+  return true;
+}
+
+// Fungsi membaca data streaming dari register 0x50
+void readECGStreamingData(int32_t *ecg1, int32_t *ecg2, int32_t *ecg3) {
+  // Buffer nilai sementara
+  int32_t value = 0;
+
+  // Pilih perangkat dengan CSB rendah
+  digitalWrite(csb, LOW);
+  SPI.transfer(0x50 | 0x80); // Address register 0x50 dengan bit read aktif
+
+  // Baca data channel 1
+  value = SPI.transfer(0x00);
+  value = (value << 8) | SPI.transfer(0x00);
+  value = (value << 8) | SPI.transfer(0x00);
+  if (value & 0x800000) {
+    value |= 0xFF000000; // Konversi ke format signed 24-bit
+  }
+  *ecg1 = value;
+
+  // Baca data channel 2
+  value = SPI.transfer(0x00);
+  value = (value << 8) | SPI.transfer(0x00);
+  value = (value << 8) | SPI.transfer(0x00);
+  if (value & 0x800000) {
+    value |= 0xFF000000; // Konversi ke format signed 24-bit
+  }
+  *ecg2 = value;
+
+  // Baca data channel 3
+  value = SPI.transfer(0x00);
+  value = (value << 8) | SPI.transfer(0x00);
+  value = (value << 8) | SPI.transfer(0x00);
+  if (value & 0x800000) {
+    value |= 0xFF000000; // Konversi ke format signed 24-bit
+  }
+  *ecg3 = value;
+
+  // Selesaikan operasi SPI
+  digitalWrite(csb, HIGH);
+}
+
+// Fungsi baseline correction
+int32_t baselineCorrection(int32_t value, int32_t *baselineBuffer) {
+  // Masukkan nilai baru ke dalam buffer
+  baselineBuffer[baselineIndex] = value;
+  baselineIndex = (baselineIndex + 1) % baselineWindowSize;
+
+  // Hitung rata-rata buffer
+  int64_t sum = 0;
+  for (int i = 0; i < baselineWindowSize; i++) {
+    sum += baselineBuffer[i];
+  }
+  int32_t average = sum / baselineWindowSize;
+
+  // Kurangi rata-rata dari nilai saat ini untuk baseline 0
+  return value - average;
+}
+
+void setup_ECG() {
+  // Konfigurasi sesuai prosedur pada gambar
+  writeRegister(0x01, 0x11);  // Channel 1: INP ke IN2, INN ke IN1
+  writeRegister(0x02, 0x19);  // Channel 2: INP ke IN3, INN ke IN1
+  writeRegister(0x03, 0x2E);  // Channel 3: INP ke IN5, INN ke IN6
+  writeRegister(0x0A, 0x07);  // Enable common-mode detector untuk IN1, IN2, IN3
+  writeRegister(0x0C, 0x04);  // Output RLD amplifier ke IN4
+  writeRegister(0x0D, 0x01);  // Buffer Wilson Reference ke IN1
+  writeRegister(0x0E, 0x02);  // Buffer Wilson Reference ke IN2
+  writeRegister(0x0F, 0x03);  // Buffer Wilson Reference ke IN3
+  writeRegister(0x10, 0x01);  // Output Wilson Reference internally ke IN6
+  writeRegister(0x12, 0x04);  // Gunakan kristal eksternal
+  writeRegister(0x21, 0x02);  // R2 decimation rate = 5 untuk semua channel
+  writeRegister(0x22, 0x10);  // R3 decimation rate = 6 untuk channel 1
+  writeRegister(0x23, 0x10);  // R3 decimation rate = 6 untuk channel 2
+  writeRegister(0x24, 0x10);  // R3 decimation rate = 6 untuk channel 3
+  writeRegister(0x27, 0x08);  // DRDYB source ke channel 1
+  writeRegister(0x2F, 0x70);  // Enable channel 1, channel 2, dan channel 3
+  writeRegister(0x00, 0x01);  // Mulai data conversion
+
+  Serial.println("ECG configuration completed.");
+}
+
+void writeRegister(byte reg, byte data) {
+  reg &= 0x7F; // Write bit = 0
+  digitalWrite(csb, LOW);
+  SPI.transfer(reg);
+  SPI.transfer(data);
+  digitalWrite(csb, HIGH);
+}
+
+byte readRegister(byte reg) {
+  byte data;
+  reg |= 0x80; // Read bit = 1
+  digitalWrite(csb, LOW);
+  SPI.transfer(reg);
+  data = SPI.transfer(0x00);
+  digitalWrite(csb, HIGH);
+  return data;
+}
+
