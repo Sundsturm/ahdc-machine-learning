@@ -1,3 +1,7 @@
+# Steps before installing packages with this .txt file:
+# 1. Initiate a Python virtual environment
+# 2. Install TensorFlow and the prerequisite packages (See https://www.tensorflow.org/install/pip or similar links)
+# 3. Install the packages with this .txt file
 imbalanced-learn
 keras-tuner
 matplotlib
@@ -7,6 +11,6 @@ scikit-learn
 scikeras
 scipy
 seaborn
-tensorflow[and-cuda]
 wfdb
-nvidia-cudnn
+jupyterlab # Choose either Jupyter Lab
+notebook # or Jupyter Notebook
