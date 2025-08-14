@@ -98,3 +98,4 @@ target/
 # Additional
 .env.example
 /cuda-samples
+*.deb
