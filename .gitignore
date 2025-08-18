@@ -99,3 +99,4 @@ target/
 .env.example
 /cuda-samples
 *.deb
+*.zip

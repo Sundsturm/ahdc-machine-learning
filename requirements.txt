@@ -19,3 +19,4 @@ wfdb
 jupyterlab # Choose either Jupyter Lab
 notebook # or Jupyter Notebook
 PyWavelets
+neurokit2
