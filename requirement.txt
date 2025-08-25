@@ -1,3 +1,4 @@
+# If you use another driver, like AMD, try to install it manually.
 # Steps before installing packages with this .txt file:
 # 1. Initiate a Python virtual environment (Python 3.9 - 3.12 & pip version >= 19.0)
 # 2. Install TensorFlow and the prerequisite packages (See https://www.tensorflow.org/install/pip or similar links)
