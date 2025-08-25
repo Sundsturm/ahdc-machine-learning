@@ -1,0 +1,23 @@
+# Steps before installing packages with this .txt file:
+# 1. Initiate a Python virtual environment (Python 3.9 - 3.12 & pip version >= 19.0)
+# 2. Install TensorFlow and the prerequisite packages (See https://www.tensorflow.org/install/pip or similar links)
+#   2a. Install NVIDIA GPU Drivers (>= 528.33)
+#   2b. Install CUDA Toolkit 12.8
+#   2c. Install cuDNN SDK 9.11.0
+#   2d. Install RAPIDS packages (WSL2, pip): cuDF (cudf-cu12 == 25.8.*) & cuML (cuml-cu12 == 25.8.*)
+#   2e. (Optional) Install TensorRT
+# 3. Install more packages with this .txt file
+imbalanced-learn
+keras-tuner
+matplotlib
+numpy
+pandas
+scikit-learn
+scikeras
+scipy
+seaborn
+wfdb
+jupyterlab # Choose either Jupyter Lab
+notebook # or Jupyter Notebook
+PyWavelets
+neurokit2
