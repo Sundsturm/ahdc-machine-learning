@@ -22,10 +22,15 @@ Several repositories were created and used for this project. There are also repo
 #### ML Training
 Machine learning is implemented using **supervised learning**. Three machine learning models are used: 
 1. **`MLP`**;
+
 MLP or multi-layer perceptron is a fundamental form of artificial neural network consisting of several fully connected layers of neurons. Each neuron in one layer is connected to every neuron in the next. The neuron layers used are dense and dropout layers.
+
 2. **`CNN`**; and
+
 CNN or convolutional neural network is a type of machine learning model in the form of a neural network that excels at processing data with a grid-like structure, such as images or raw ECG signals. This machine learning model can automatically detect and learn hierarchical features from simple edges to complex patterns with convolutional layers.
+
 3. **`Random Forest`**.
+
 Random Forest is an ensemble learning model that works by building many decision trees during training. To make predictions, the model gathers the output from all trees and takes a majority vote for classification or the average for regression. This makes the training results more accurate and resistant to overfitting than a single tree.
 
 The results of the artificial intelligence training can be determined based on specific metrics. The primary metrics for this training are:
@@ -171,6 +176,7 @@ jupyter notebook #  Jupyter Notebook
 2. G. Silva, P. Silva, G. Moreira, V. Freitas, J. Gertrudes, and E. Luz, "A Systematic Review of ECG Arrhythmia Classification: Adherence to Standards, Fair Evaluation, and Embedded Feasibility," arXiv preprint arXiv:2503.07276, 2025. [Online]. Available: https://arxiv.org/abs/2503.07276
 3. S. Aziz, S. Ahmed, and M.-S. Alouini, "ECG-based machine-learning algorithms for heartbeat classification," Sci. Rep., vol. 11, no. 1, Art. no. 18738, Sep. 2021, doi: 10.1038/s41598-021-97118-5.
 4. Y. Ansari, O. Mourad, K. Qaraqe, and E. Serpedin, "Deep learning for ECG Arrhythmia detection and classification: an overview of progress for period 2017-2023," Front. Physiol., vol. 14, Art. no. 1246746, Sep. 2023, doi: 10.3389/fphys.2023.1246746.
+
 
 
 
