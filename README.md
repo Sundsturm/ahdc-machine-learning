@@ -27,6 +27,7 @@ MLP or multi-layer perceptron is a fundamental form of artificial neural network
 CNN or convolutional neural network is a type of machine learning model in the form of a neural network that excels at processing data with a grid-like structure, such as images or raw ECG signals. This machine learning model can automatically detect and learn hierarchical features from simple edges to complex patterns with convolutional layers.
 3. **`Random Forest`**.
 Random Forest is an ensemble learning model that works by building many decision trees during training. To make predictions, the model gathers the output from all trees and takes a majority vote for classification or the average for regression. This makes the training results more accurate and resistant to overfitting than a single tree.
+
 The results of the artificial intelligence training can be determined based on specific metrics. The primary metrics for this training are:
 1. **`Accuracy`**: Measures how often the model makes correct predictions out of the total data. It is calculated as the ratio of the number of correct predictions (both positive and negative) to the total number of predictions;
 2. **`Precision`**: Focuses on the quality/consistency of positive predictions, or the percentage of truly positive predictions out of all positive predictions made by the model;
@@ -170,6 +171,7 @@ jupyter notebook #  Jupyter Notebook
 2. G. Silva, P. Silva, G. Moreira, V. Freitas, J. Gertrudes, and E. Luz, "A Systematic Review of ECG Arrhythmia Classification: Adherence to Standards, Fair Evaluation, and Embedded Feasibility," arXiv preprint arXiv:2503.07276, 2025. [Online]. Available: https://arxiv.org/abs/2503.07276
 3. S. Aziz, S. Ahmed, and M.-S. Alouini, "ECG-based machine-learning algorithms for heartbeat classification," Sci. Rep., vol. 11, no. 1, Art. no. 18738, Sep. 2021, doi: 10.1038/s41598-021-97118-5.
 4. Y. Ansari, O. Mourad, K. Qaraqe, and E. Serpedin, "Deep learning for ECG Arrhythmia detection and classification: an overview of progress for period 2017-2023," Front. Physiol., vol. 14, Art. no. 1246746, Sep. 2023, doi: 10.3389/fphys.2023.1246746.
+
 
 
 
