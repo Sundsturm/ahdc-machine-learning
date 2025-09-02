@@ -125,12 +125,12 @@ The training utilizes three models and the explanation for each modelcan be seen
 All training that has been conducted can be modified to achieve better performance.
 
 #### Suggestions/Future Works
-1. Tune the hyperparameters of the trainable layers in the 1D-CNN until the most optimal results are found.
-2. Tune the hyperparameters of the other models, namely MLP and Random Forest, until optimal results are found.
-3. Create separate Python files for each stage of the pipeline if the training results are good, so the repository can be easily reproduced.
-4. Review, understand, replicate, and modify references from GitHub related to machine learning model training for arrhythmia detection and classification.
-5. Explore other papers related to artificial intelligence for arrhythmia detection and classification.
-6. Implement the exported model into the ECG Holter GUI if the model's performance is excellent.
+1. Tune the hyperparameters of the trainable layers in the 1D-CNN until the most optimal results are found
+2. Tune the hyperparameters of the other models, namely MLP and Random Forest, until optimal results are found
+3. Create separate Python files for each stage of the pipeline if the training results are good, so the repository can be easily reproduced
+4. Review, understand, replicate, and modify references from GitHub related to machine learning model training for arrhythmia detection and classification
+5. Explore other papers related to artificial intelligence for arrhythmia detection and classification
+6. Implement the exported model into the ECG Holter GUI if the model's performance is excellent
 
 ## How to Use the Project
 ### Creating Virtual Environment and Using a Python Package Manager
@@ -171,6 +171,7 @@ jupyter notebook #  Jupyter Notebook
 2. G. Silva, P. Silva, G. Moreira, V. Freitas, J. Gertrudes, and E. Luz, "A Systematic Review of ECG Arrhythmia Classification: Adherence to Standards, Fair Evaluation, and Embedded Feasibility," arXiv preprint arXiv:2503.07276, 2025. [Online]. Available: https://arxiv.org/abs/2503.07276
 3. S. Aziz, S. Ahmed, and M.-S. Alouini, "ECG-based machine-learning algorithms for heartbeat classification," Sci. Rep., vol. 11, no. 1, Art. no. 18738, Sep. 2021, doi: 10.1038/s41598-021-97118-5.
 4. Y. Ansari, O. Mourad, K. Qaraqe, and E. Serpedin, "Deep learning for ECG Arrhythmia detection and classification: an overview of progress for period 2017-2023," Front. Physiol., vol. 14, Art. no. 1246746, Sep. 2023, doi: 10.3389/fphys.2023.1246746.
+
 
 
 
