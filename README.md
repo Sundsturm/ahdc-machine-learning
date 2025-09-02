@@ -35,6 +35,7 @@ Random Forest adalah model *ensemble learning* yang bekerja dengan membangun ban
 
 Setiap sesi pembelajaran/pelatihan mengikuti *pipeline* sesuai gambar berikut.
 ![PipelineML](https://hackmd.io/_uploads/H14NRFhKgx.png)
+
 *Pipeline* ini merupakan gambaran kasar dalam melakukan pembelajaran mesin.
 
 Selain *pipeline*, hasil pelatihan kecerdasan buatan dapat diketahui berdasarkan metrik-metrik tertentu. Metrik-metrik yang diutamakan untuk pelatihan ini adalah
@@ -240,3 +241,4 @@ jupyter notebook # Menjalankan Jupyter Notebook
 2. G. Silva, P. Silva, G. Moreira, V. Freitas, J. Gertrudes, and E. Luz, "A Systematic Review of ECG Arrhythmia Classification: Adherence to Standards, Fair Evaluation, and Embedded Feasibility," arXiv preprint arXiv:2503.07276, 2025. [Online]. Available: https://arxiv.org/abs/2503.07276
 3. S. Aziz, S. Ahmed, and M.-S. Alouini, "ECG-based machine-learning algorithms for heartbeat classification," Sci. Rep., vol. 11, no. 1, Art. no. 18738, Sep. 2021, doi: 10.1038/s41598-021-97118-5.
 4. Y. Ansari, O. Mourad, K. Qaraqe, and E. Serpedin, "Deep learning for ECG Arrhythmia detection and classification: an overview of progress for period 2017-2023," Front. Physiol., vol. 14, Art. no. 1246746, Sep. 2023, doi: 10.3389/fphys.2023.1246746.
+
